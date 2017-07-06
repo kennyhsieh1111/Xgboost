@@ -1,0 +1,260 @@
+---
+title: "Xgboost Hands-on"
+author: "Kenny Hsieh"
+date: "2017/7/5"
+output: html_document
+---
+
+```{r global_options, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Xgboost, eXtreme Gradient Boosting，是目前在 Kaggle 數據分析平台上奪冠常勝的演算法之一。
+
+- Ensemble Boosting, used for **supervised** learning problem
+- Linear Model Solver + Tree Learning Algorithm
+- Similar to **Gradient Boosting (gbm)** framework, used a more regularized model formalization to control overfitting.
+- Various Objective : Regression, Classfication,  Cross-validation, Importance Variable.
+- Capable to **do Parallel** (Openmp) computation
+
+[Xgboost Github](https://github.com/dmlc/xgboost/tree/master/demo/kaggle-higgs)
+<br>
+
+## Basic Hands-on
+這篇教學使用 `Agaricus` 資料集進行示範 (UCI Machine Learning Repository)，預測該香菇是否可食用
+
+### 1. Input Type
+
+- Dense Matrix : `matrix`
+- Sparse Matrix : `dgCMatrix`<br>
+（稀疏矩陣，雖有大量的 0 空值，但不會佔用記憶體，xgboost 有特別針對稀疏進行優化）
+- xgboost Exclusive : `xgb.DMatrix` （建議使用）
+
+矩陣內僅接受 `numeric` 資料格式，不支援 `categorical`，若需進行 **One-hot Encoding** 轉成 dummy variable 處理
+
+```{r message=FALSE, warning=FALSE}
+require(xgboost)
+
+data(agaricus.train, package='xgboost')
+data(agaricus.test, package='xgboost')
+
+train <- agaricus.train
+test <- agaricus.test
+```
+
+### 2. Observe Data Structure
+
+訓練資料為 `list` 結構，含有資料 `data` 以及標籤 `label`
+
+```{r}
+str(train)
+```
+
+<br>資料 `data` 為稀疏矩陣
+```{r}
+class(train$data)[1]
+```
+
+<br>標籤 `label` 代表訓練資料的結果，而我們透過 xgboost 預測 `label`
+```{r}
+class(train$label)
+```
+
+### 3. Model Building
+由於我們希望找出香菇為可食或不可食用，因此進行 `objective = "binary:logistic"` 二元分類
+<br><br>xgboost 詳細的參數設定，在進階篇章會深入探討
+<br><br>採用 `dgCMatrix` 丟入模型中
+```{r}
+bstSparse <- xgboost(data = train$data, label = train$label, 
+                     max_depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic")
+```
+
+<br>亦可轉換為 xgb.DMatrix
+```{r}
+dtrain <- xgb.DMatrix(data = train$data, label = train$label)
+bstDMatrix <- xgboost(data = dtrain, 
+                      max_depth = 2, eta = 1, nthread = 2, nrounds = 2, objective = "binary:logistic")
+```
+
+到這裡已經建立好基本的 xgboost 模型了
+
+### 4. Prediction
+將先前準備好的 `test` 測試資料集，投入到建立好的模型中進行預測
+
+<br>輸出結果為介在 [0, 1] 的機率，需再經由轉換得到最後的結果
+```{r}
+pred <- predict(bstDMatrix, test$data)
+head(pred)
+```
+
+
+<br>這邊我們以 0.5 做為分割點，以上代表 1, 反之為 0，得到模型預測的結果
+```{r}
+prediction <- as.numeric(pred > 0.5)
+head(prediction)
+```
+
+### 5. Accuracy
+建立 Contingency Table 觀察預測結果
+```{r}
+table(prediction, test$label)
+```
+
+<br>最後預測結果，準確度高達 98%
+```{r}
+err <- mean(prediction != test$label)
+print(paste("test-acc =", round(1- err, digits = 2)))
+```
+
+<br>
+
+## Advanced Techiniques
+### Data Preparation
+在作者的文件當中，建議使用 `xgb.DMatrix` 資料型態，除了能夠讓 xgboost 更快的運算，同時也便於後續進行進階操作
+
+<br>`xgb.DMatrix` 不同於傳統資料格式，資料和標籤需分開儲存
+```{r}
+dtrain <- xgb.DMatrix(data = train$data, label=train$label)
+dtest <- xgb.DMatrix(data = test$data, label=test$label)
+```
+
+<br>
+
+#### Information Extraction
+```{r}
+label <- getinfo(dtest, "label")
+```
+
+<br>
+
+#### Save / Load
+```{r results = "hide"}
+xgb.DMatrix.save(dtrain, "dtrain.buffer")
+dtrain2 <- xgb.DMatrix("dtrain.buffer")
+```
+
+<br>
+
+### Model Training
+`xgboost` 和 `xgb.train` 皆是訓練模型函式
+
+- `xgboost` 為簡單易用版，能夠快速建立基本的模型
+- `xgb.train` 則提供更多參數調整，且只接受 `xgbDMatrix`
+
+<br>
+
+#### Parameter Setup
+- watchlist
+
+```{r}
+watchlist <- list(train=dtrain, test=dtest)
+
+bst <- xgb.train(data=dtrain, max_depth=2, eta=1, nthread = 2, nrounds=2, 
+                 watchlist=watchlist, objective = "binary:logistic")
+
+# Multi Evaluation Metrics
+bst <- xgb.train(data=dtrain, max_depth=2, eta=1, nthread = 2, nrounds=2, 
+                 watchlist=watchlist, eval_metric = "error", eval_metric = "logloss", objective = "binary:logistic")
+```
+ `train-error` 和 `test-error` 輸出結果理論上需要相近，若是結果有明顯差異，需要重新檢視分割訓練和測試資料的狀況。
+
+- slice
+
+<br>
+
+#### Setup Self Evaluation Function
+除了套件內提供的衡量標準，也可以視需求撰寫自己需要的標準
+
+```{r}
+logregobj <- function(preds, dtrain) { 
+  labels <- getinfo(dtrain, "label") 
+  preds <- 1/(1 + exp(-preds))
+  grad <- preds - labels
+  hess <- preds * (1 - preds)
+
+  return(list(grad = grad, hess = hess))
+}
+
+evalerror <- function(preds, dtrain) { 
+  labels <- getinfo(dtrain, "label") 
+  err <- sqrt(mean((preds-labels)^2))
+  
+  return(list(metric = "MSE", value = err)) 
+}
+
+dtest <- xgb.DMatrix(test$data, label = test$label)
+watchlist <- list(eval = dtest, train = dtrain)
+param <- list(max_depth = 2, eta = 1, silent = 1)
+
+bst <- xgb.train(param, dtrain, nrounds = 2, watchlist, logregobj, evalerror, maximize = FALSE)
+
+```
+
+<br>
+
+### View the Trees
+```{r}
+xgb.dump(bst, with_stats = T)
+```
+
+```{r}
+xgb.plot.tree(model = bst)
+```
+
+<br>
+
+### Feature Importance
+查看資料集內各變數對預測結果的重要性程度
+
+```{r}
+importance_matrix <- xgb.importance(model = bstDMatrix)
+print(importance_matrix)
+```
+
+- Gain : Representthe improvement in accuracy brought by a feature to the branches it is on.
+- Cover : Measures the relative quantity of observations concerned by a feature.
+- Frequency : A simpler way to measure the Gain. It just counts the number of times a feature is used in all generated trees.
+
+<br>
+
+```{r fig.width = 5, fig.height = 3}
+xgb.plot.importance(importance_matrix = importance_matrix)
+```
+
+### Linear Boosting
+上面基本練習採用基於樹結構的方法，xgboost 也提供線性方法
+
+<br>線性方法常用在簡單的資料集，有效的抓出資料集內線性關係
+<br>但通常樹的方法普遍優於線性，找出變數間非線性的關係，建議嘗試兩種方式進行觀察
+
+- add `booster : "gbLinear"`
+- removing `eta` parameter
+```{r}
+bst <- xgb.train(data=dtrain, booster = "gblinear", 
+                 max_depth=2, nthread = 2, nrounds=2, 
+                 watchlist=watchlist, 
+                 eval_metric = "error", eval_metric = "logloss", objective = "binary:logistic")
+```
+
+<br>
+
+### Model Saving / Loading
+```{r}
+xgb.save(bst, "xgboost.model")
+```
+
+```{r}
+bst_laod <- xgb.load("xgboost.model")
+pred2 <- predict(bst_laod, test$data)
+```
+
+<br>
+
+## Reference
+- [Tianqi Chen, Tong He - xgboost: eXtreme Gradient Boosting](https://cran.r-project.org/web/packages/xgboost/vignettes/xgboost.pdf)
+- [CRAN - XGBoost R Tutorial](https://cran.r-project.org/web/packages/xgboost/vignettes/xgboostPresentation.html)
+- [CRAN - Understand your dataset with XGBoost](https://cran.r-project.org/web/packages/xgboost/vignettes/discoverYourData.html)
+- 官方教學範例 ：[Xgboost R Package Demo](https://github.com/dmlc/xgboost/tree/master/R-package/demo)
+
+- Kaggle Winning Solution

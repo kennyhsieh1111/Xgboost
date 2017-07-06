@@ -1,0 +1,8 @@
+name: Publish Document
+title:
+account: rpubs
+server: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/289569/4081850d8db14148a1c29d0c266cec16
+bundleId: https://api.rpubs.com/api/v1/document/289569/4081850d8db14148a1c29d0c266cec16
+url: http://rpubs.com/KennyHsieh/289569/edit
+when: 1499360499.63173
