@@ -14,6 +14,7 @@ Xgboost, eXtreme Gradient Boosting，是目前在 Kaggle 數據分析平台上�
 
 - Ensemble Boosting, used for **supervised** learning problem
 - Linear Model Solver + Tree Learning Algorithm
+- Deliever exceptional, great results with sparse matrices.
 - Similar to **Gradient Boosting (gbm)** framework, used a more regularized model formalization to control overfitting.
 - Various Objective : Regression, Classfication,  Cross-validation, Importance Variable.
 - Capable to **do Parallel** (Openmp) computation
@@ -139,13 +140,28 @@ dtrain2 <- xgb.DMatrix("dtrain.buffer")
 ### Model Training
 `xgboost` 和 `xgb.train` 皆是訓練模型函式
 
-- `xgboost` 為簡單易用版，能夠快速建立基本的模型
+- `xgboost` 為簡單易用版，能夠快速建立基本的模型，不支援少數變數（ex. watchlist）
 - `xgb.train` 則提供更多參數調整，且只接受 `xgbDMatrix`
 
 <br>
 
 #### Parameter Setup
-- watchlist
+常用調整參數，更細緻的調優方法參考
+
+- [Official Xgboost Parametes](http://xgboost.readthedocs.io/en/latest/parameter.html#parameters-in-r-package)
+- [XGBoost 參數調優完全指南](http://weiwenku.net/d/100702111)
+- [XGBoost 參數解釋](http://blog.csdn.net/wzmsltw/article/details/50994481)
+
+1. 選擇較快的學習速率，初始為0.1，調整區間大致落在[0.05, 0.3]之間
+2. 選擇對應於此學習速率的理想決策樹數量
+3. 決策樹特定參數調優 (max_depth, min_child_weight, gamma, subsample, colsample_bytree)
+4. 正規化參數調優(lambda, alpha)
+5. 降低學習速率，確定理想參數
+
+##### Learning Task Parameters
+- objective : binary:logistic, multi:softmax, multi:softprobㄋ
+- eval_metric: rmse, mae, logloss, error, merror, mlogloss, auc, user-setup
+- watchlist : 訓練和測試資料的 list，提供兩資料集的錯誤率
 
 ```{r}
 watchlist <- list(train=dtrain, test=dtest)
@@ -158,8 +174,6 @@ bst <- xgb.train(data=dtrain, max_depth=2, eta=1, nthread = 2, nrounds=2,
                  watchlist=watchlist, eval_metric = "error", eval_metric = "logloss", objective = "binary:logistic")
 ```
  `train-error` 和 `test-error` 輸出結果理論上需要相近，若是結果有明顯差異，需要重新檢視分割訓練和測試資料的狀況。
-
-- slice
 
 <br>
 
@@ -226,7 +240,7 @@ xgb.plot.importance(importance_matrix = importance_matrix)
 上面基本練習採用基於樹結構的方法，xgboost 也提供線性方法
 
 <br>線性方法常用在簡單的資料集，有效的抓出資料集內線性關係
-<br>但通常樹的方法普遍優於線性，找出變數間非線性的關係，建議嘗試兩種方式進行觀察
+<br>通常樹的方法普遍優於線性，找出變數間非線性的關係，建議嘗試兩種方式進行觀察
 
 - add `booster : "gbLinear"`
 - removing `eta` parameter
@@ -239,6 +253,22 @@ bst <- xgb.train(data=dtrain, booster = "gblinear",
 
 <br>
 
+### Ensemble Method
+
+若是單純使用 xgboost，或是其他模型效果不如預期(weak learners)，可以考慮採用 Ensemble 混合模型的方式，建立強模型(Strong Learner)。
+
+```{r}
+Mode <- function(x){
+  u <- unique(x)
+  u[which.max(tabulate(match(x, u)))]
+}
+
+# 將所有單一模型之預測結果合併 predict_collection，採用出現最多之結果
+# final_results <- apply(predict_collection, 1, Mode)
+```
+
+<br>
+
 ### Model Saving / Loading
 ```{r}
 xgb.save(bst, "xgboost.model")
@@ -247,6 +277,19 @@ xgb.save(bst, "xgboost.model")
 ```{r}
 bst_laod <- xgb.load("xgboost.model")
 pred2 <- predict(bst_laod, test$data)
+```
+
+<br>
+
+**Bug** : <br>
+雖然套件提供儲存模型模型的方法，但是經過實際測試後，發現預測結果並不會相同，[StackOverflow](https://github.com/dmlc/xgboost/issues/2051) 上仍是 Open 的狀態。<br> 
+可以改採儲存 R object 的方式，來達到同樣的目標。
+
+```{r}
+saveRDS(bst, 'xgboost.model.rds')
+
+xgb_load <- readRDS('xgboost.model.rds')
+xgb_load <- xgb.Booster.complete(xgb_load)
 ```
 
 <br>
