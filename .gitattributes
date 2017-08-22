@@ -1,0 +1,4 @@
+rsconnect/* linguist-vendored
+Xgboost.html linguist-vendored
+*.R linguist-language=R
+*.Rmd linguist-language=R
